@@ -1,0 +1,1 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShareContest</title><link rel="stylesheet" href="{{ asset('app.css') }}"></head><body><main class="shell"><a class="brand" href="/">Share<span>Contest</span></a>@yield('content')</main></body></html>

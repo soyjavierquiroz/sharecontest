@@ -2,57 +2,146 @@
 
 namespace App\Services\Social;
 
-use Carbon\Carbon;
-use Throwable;
-
 class InstagramProvider extends AbstractOpenGraphProvider
 {
-    protected function platform(): string { return 'instagram'; }
+    protected function platform(): string
+    {
+        return 'instagram';
+    }
+
+    public static function isGenericAuthor(?string $author): bool
+    {
+        if ($author === null) {
+            return false;
+        }
+        $normalized = mb_strtolower(trim($author));
+        $normalized = str_replace('&', 'and', $normalized);
+        $normalized = preg_replace('/[^\pL\pN]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+        return in_array($normalized, [
+            'instagram', 'instagram com', 'instagram photo and video',
+            'instagram photos and videos', 'instagram photos videos',
+            'instagram the photo and video sharing app',
+        ], true);
+    }
 
     /** @param array<string, mixed> $metadata */
     protected function hydratePlatformPublicData(SocialPostData $data, array $metadata): void
     {
         $meta = $metadata['meta'] ?? [];
         $title = (string) ($meta['og:title'] ?? '');
-        $description = (string) ($meta['og:description'] ?? '');
+        $rawMetadata = $data->rawMetadata ?? [];
+        $fieldSources = is_array($rawMetadata['field_sources'] ?? null) ? $rawMetadata['field_sources'] : [];
 
-        if (preg_match('/^(.+?)\s+(?:on|en|auf|em)\s+Instagram\s*:/iu', $title, $match)
-            && ($data->author === null || strcasecmp($data->author, 'Instagram') === 0)) {
-            $data->author = trim($match[1]);
+        if (self::isGenericAuthor($data->author)) {
+            $data->author = null;
+        }
+        if ($data->author !== null) {
+            $fieldSources['author'] = ! empty($meta['author']) ? 'meta:author' : 'opengraph';
         }
 
-        if (preg_match('/-\s*@?([\pL\pN._]+)\s+(?:on|en|auf|em)\s+/iu', $description, $match)) {
-            $data->username ??= $match[1];
-        }
-
-        if (preg_match('/-\s*@?[\pL\pN._]+\s+(?:on|en|auf|em)\s+(.+?)(?::\s*["“]|$)/iu', $description, $match)) {
-            try {
-                $data->publishedAt ??= Carbon::parse(trim($match[1]), 'UTC')->startOfDay();
-            } catch (Throwable) {
-                // The public page can be localized to an unsupported date format.
+        if ($data->author === null && preg_match('/^(.+?)\s+(?:on|en|auf|em)\s+Instagram\s*:/iu', $title, $match)) {
+            $candidate = trim($match[1]);
+            if (! self::isGenericAuthor($candidate)) {
+                $data->author = $candidate;
+                $fieldSources['author'] = 'og:title';
             }
         }
 
-        if (preg_match('/([\d.,\s]+[KMB]?)\s+likes?\s*,\s*([\d.,\s]+[KMB]?)\s+comments?/iu', $description, $match)) {
-            $data->likes ??= $this->compactInteger($match[1]);
-            $data->comments ??= $this->compactInteger($match[2]);
+        if ($data->username !== null) {
+            $fieldSources['username'] = $this->usernameSource($meta);
+        }
+        if ($data->publishedAt !== null) {
+            $fieldSources['published_at'] = 'public_metadata';
+        }
+        if ($data->likes !== null) {
+            $fieldSources['likes'] = 'public_metadata';
+        }
+        if ($data->comments !== null) {
+            $fieldSources['comments'] = 'public_metadata';
         }
 
-        if (preg_match('/:\s*["“](.*?)["”]\.?(?:\s*)$/us', $description, $match)) {
-            $data->caption = $match[1];
+        $descriptionParser = app(InstagramMetaDescriptionParser::class);
+        $structuredDescription = null;
+        $captionCandidate = null;
+        foreach ($this->descriptionCandidates($meta) as $description) {
+            $parsed = $descriptionParser->parse($description['value']);
+            if ($parsed !== null) {
+                $structuredDescription ??= $parsed;
+
+                continue;
+            }
+            $captionCandidate ??= $description;
         }
 
-        $data->rawMetadata = [...($data->rawMetadata ?? []), 'public_extraction' => 'instagram-og'];
+        if ($structuredDescription !== null) {
+            $data->likes ??= $structuredDescription['likes'];
+            $data->comments ??= $structuredDescription['comments'];
+            $data->username ??= $structuredDescription['username'];
+            if ($data->publishedAt === null && $structuredDescription['published_at'] !== null) {
+                $data->publishedAt = $structuredDescription['published_at'];
+                $rawMetadata['published_at_precision'] = 'date';
+                $rawMetadata['published_at_source'] = 'instagram_meta_description';
+                $fieldSources['published_at'] = 'instagram_meta_description';
+            }
+            if ($structuredDescription['likes'] !== null && ! isset($fieldSources['likes'])) {
+                $fieldSources['likes'] = 'instagram_meta_description';
+            }
+            if ($structuredDescription['comments'] !== null && ! isset($fieldSources['comments'])) {
+                $fieldSources['comments'] = 'instagram_meta_description';
+            }
+            if ($structuredDescription['username'] !== null && ! isset($fieldSources['username'])) {
+                $fieldSources['username'] = 'instagram_meta_description';
+            }
+
+            // This is metadata, not text written by the post author.
+            $data->caption = $captionCandidate['value'] ?? $structuredDescription['caption'];
+            if ($data->caption !== null) {
+                $fieldSources['caption'] = $captionCandidate['source'] ?? 'instagram_meta_description';
+            } else {
+                unset($fieldSources['caption']);
+            }
+            $rawMetadata['structured_meta_description'] = true;
+        } elseif ($data->caption !== null) {
+            $fieldSources['caption'] = $this->captionSource($meta, $data->caption);
+        }
+
+        if ($data->author === null) {
+            unset($fieldSources['author']);
+        }
+        $rawMetadata['field_sources'] = $fieldSources;
+        $rawMetadata['public_extraction'] = 'instagram';
+        $data->rawMetadata = $rawMetadata;
     }
 
-    private function compactInteger(string $value): ?int
+    /** @return array<int, array{source:string,value:string}> */
+    private function descriptionCandidates(array $meta): array
     {
-        $value = strtoupper(str_replace([' ', "\u{00A0}"], '', trim($value)));
-        if (!preg_match('/^(\d+(?:[.,]\d+)?)([KMB])?$/', $value, $match)) return null;
+        $candidates = [];
+        foreach (['og:description' => 'opengraph', 'description' => 'meta_description'] as $key => $source) {
+            $value = trim((string) ($meta[$key] ?? ''));
+            if ($value !== '') {
+                $candidates[] = ['source' => $source, 'value' => $value];
+            }
+        }
 
-        $number = (float) str_replace(',', '.', $match[1]);
-        $factor = match ($match[2] ?? '') { 'K' => 1_000, 'M' => 1_000_000, 'B' => 1_000_000_000, default => 1 };
+        return $candidates;
+    }
 
-        return (int) round($number * $factor);
+    private function usernameSource(array $meta): string
+    {
+        foreach (['profile:username', 'instagram:username', 'twitter:creator'] as $key) {
+            if (! empty($meta[$key])) {
+                return 'meta:'.$key;
+            }
+        }
+
+        return 'public_metadata';
+    }
+
+    private function captionSource(array $meta, string $caption): string
+    {
+        return ($meta['og:description'] ?? null) === $caption ? 'opengraph' : 'meta_description';
     }
 }

@@ -12,6 +12,7 @@ class SocialPostData
         public ?string $canonicalUrl = null,
         public ?string $externalId = null,
         public ?string $author = null,
+        public ?string $username = null,
         public ?string $caption = null,
         public ?CarbonInterface $publishedAt = null,
         public ?bool $isPublic = null,

@@ -13,27 +13,28 @@ class RefreshSubmission
     {
         $data = $this->providers->for($submission->platform)->inspect($submission->original_url);
         $caption = $data->caption ?? $submission->caption;
-        $hashtagValid = $caption !== null ? str_contains(mb_strtolower($caption), mb_strtolower($submission->contest->required_hashtag)) : null;
+        $hasUsefulMetadata = $data->author !== null || $data->username !== null || $caption !== null || $data->publishedAt !== null || $data->views !== null || $data->likes !== null || $data->comments !== null;
         $status = match (true) {
             $data->isPublic === false => 'invalid',
-            $data->isPublic !== true || $caption === null || $hashtagValid === null => 'review_required',
-            $hashtagValid === false => 'invalid',
+            $data->isPublic !== true || !$hasUsefulMetadata => 'review_required',
             default => 'valid',
         };
         $submission->fill([
             'canonical_url' => $data->canonicalUrl ?? $submission->canonical_url,
             'external_id' => $data->externalId ?? $submission->external_id,
             'author' => $data->author ?? $submission->author,
+            'username' => $data->username ?? $submission->username,
             'caption' => $caption,
             'published_at' => $data->publishedAt ?? $submission->published_at,
             'is_public' => $data->isPublic,
-            'hashtag_valid' => $hashtagValid,
+            'hashtag_valid' => null,
             'views' => $data->views ?? $submission->views,
             'likes' => $data->likes ?? $submission->likes,
             'comments' => $data->comments ?? $submission->comments,
             'status' => $status,
-            'validation_message' => $data->error ?: ($status === 'valid' ? 'Participación validada.' : ($status === 'invalid' ? 'No cumple los requisitos del concurso.' : 'Pendiente de verificación manual.')),
+            'validation_message' => $data->error ?: ($status === 'valid' ? 'Datos públicos obtenidos.' : ($status === 'invalid' ? 'La publicación no está disponible o no es válida.' : 'Datos parciales: no pudimos obtener toda la información pública.')),
             'provider' => $data->provider,
+            'raw_metadata' => $data->rawMetadata ?? $submission->raw_metadata,
             'last_checked_at' => now(),
         ])->save();
         if ($data->views !== null || $data->likes !== null || $data->comments !== null) $submission->metricSnapshots()->create(['views' => $data->views, 'likes' => $data->likes, 'comments' => $data->comments, 'captured_at' => now(), 'provider' => $data->provider]);

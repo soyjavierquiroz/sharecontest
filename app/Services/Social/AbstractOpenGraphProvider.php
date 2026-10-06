@@ -2,14 +2,13 @@
 
 namespace App\Services\Social;
 
-use Carbon\Carbon;
 use Throwable;
 
 abstract class AbstractOpenGraphProvider implements SocialPostProviderInterface
 {
     abstract protected function platform(): string;
 
-    public function __construct(protected PlatformDetector $detector, protected SafeSocialHttpClient $http) {}
+    public function __construct(protected PlatformDetector $detector, protected SafeSocialHttpClient $http, protected PublicMetadataParser $parser) {}
 
     public function inspect(string $url): SocialPostData
     {
@@ -21,29 +20,22 @@ abstract class AbstractOpenGraphProvider implements SocialPostProviderInterface
             if (!$response->successful()) { $data->error = 'La plataforma respondió HTTP '.$response->status(); return $data; }
             $html = $response->body();
             if (preg_match('/\b(log in|login|inicia sesi[oó]n|challenge_required)\b/i', $html)) { $data->error = 'La plataforma requiere inicio de sesión.'; return $data; }
-            $meta = $this->meta($html);
+            $metadata = $this->parser->parse($html);
+            $meta = $metadata['meta'];
+            $metrics = $this->parser->metrics($metadata);
             $data->isPublic = true;
             $data->caption = $meta['og:description'] ?? $meta['description'] ?? null;
             $data->author = $meta['author'] ?? $meta['og:site_name'] ?? null;
-            if (!empty($meta['article:published_time'])) { try { $data->publishedAt = Carbon::parse($meta['article:published_time']); } catch (Throwable) {} }
-            $data->rawMetadata = $meta;
+            $data->username = $this->parser->username($metadata);
+            $data->publishedAt = $this->parser->date($metadata);
+            $data->views = $metrics['views'];
+            $data->likes = $metrics['likes'];
+            $data->comments = $metrics['comments'];
+            $data->rawMetadata = $this->parser->storageMetadata($metadata);
             return $data;
         } catch (Throwable $e) {
             $data->error = 'No se pudo consultar la plataforma: '.$e->getMessage();
             return $data;
         }
-    }
-
-    private function meta(string $html): array
-    {
-        $meta = [];
-        libxml_use_internal_errors(true);
-        $doc = new \DOMDocument();
-        if (@$doc->loadHTML($html)) foreach ($doc->getElementsByTagName('meta') as $node) {
-            $key = strtolower($node->getAttribute('property') ?: $node->getAttribute('name'));
-            $value = trim($node->getAttribute('content'));
-            if ($key && $value && !isset($meta[$key])) $meta[$key] = $value;
-        }
-        return $meta;
     }
 }

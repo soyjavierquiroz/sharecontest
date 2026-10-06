@@ -27,7 +27,7 @@ class SafeSocialHttpClient
                     }
                 },
             ])
-                ->withHeaders(['User-Agent' => 'ShareContest/1.0 (+public metadata validation)', 'Accept' => 'text/html,application/json;q=0.9,*/*;q=0.8'])
+                ->withHeaders(['User-Agent' => 'ShareContest/1.0 (+public metadata validation)', 'Accept' => 'text/html,application/json;q=0.9,*/*;q=0.8', 'Accept-Language' => 'en'])
                 ->get($current);
             if (strlen($response->body()) > self::MAX_RESPONSE_BYTES) {
                 throw new RuntimeException('La respuesta pública excede el límite permitido.');

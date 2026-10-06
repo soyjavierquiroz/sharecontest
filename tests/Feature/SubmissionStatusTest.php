@@ -57,6 +57,36 @@ class SubmissionStatusTest extends TestCase
         $this->assertNull($submission->fresh()->published_at);
     }
 
+    public function test_refresh_does_not_erase_existing_metrics_when_a_later_extraction_has_none(): void
+    {
+        $submission = $this->submission('tiktok');
+        $submission->update(['views' => 50000, 'likes' => 4000, 'comments' => 99, 'is_public' => true]);
+        $this->refreshWith(new class implements SocialPostProviderInterface {
+            public function inspect(string $url): SocialPostData { return new SocialPostData('tiktok', $url, isPublic: true, author: 'Ruta', provider: 'fake'); }
+        }, $submission);
+
+        $stored = $submission->fresh();
+        $this->assertSame(50000, $stored->views);
+        $this->assertSame(4000, $stored->likes);
+        $this->assertSame(99, $stored->comments);
+        $this->assertCount(0, $stored->metricSnapshots);
+    }
+
+    public function test_accessible_publication_without_metrics_is_not_invalid(): void
+    {
+        $submission = $this->submission('tiktok');
+        $this->refreshWith(new class implements SocialPostProviderInterface {
+            public function inspect(string $url): SocialPostData { return new SocialPostData('tiktok', $url, isPublic: true, author: 'Ruta', caption: 'Post público', provider: 'fake'); }
+        }, $submission);
+
+        $stored = $submission->fresh();
+        $this->assertSame('valid', $stored->status);
+        $this->assertTrue($stored->is_public);
+        $this->assertNull($stored->views);
+        $this->assertNull($stored->likes);
+        $this->assertNull($stored->comments);
+    }
+
     public function test_external_errors_require_review_and_do_not_reject(): void
     {
         $submission = $this->submission('instagram');

@@ -8,6 +8,8 @@ use RuntimeException;
 
 class SafeSocialHttpClient
 {
+    private const MAX_RESPONSE_BYTES = 2_000_000;
+
     public function __construct(private PlatformDetector $detector) {}
 
     /** @return array{0: Response, 1: string} */
@@ -16,9 +18,20 @@ class SafeSocialHttpClient
         $current = $url;
         for ($i = 0; $i < 4; $i++) {
             $this->assertSafe($current);
-            $response = Http::timeout(8)->connectTimeout(4)->withOptions(['allow_redirects' => false])
+            $response = Http::timeout(8)->connectTimeout(4)->withOptions([
+                'allow_redirects' => false,
+                'on_headers' => function ($response): void {
+                    $length = (int) $response->getHeaderLine('Content-Length');
+                    if ($length > self::MAX_RESPONSE_BYTES) {
+                        throw new RuntimeException('La respuesta pública excede el límite permitido.');
+                    }
+                },
+            ])
                 ->withHeaders(['User-Agent' => 'ShareContest/1.0 (+public metadata validation)', 'Accept' => 'text/html,application/json;q=0.9,*/*;q=0.8'])
                 ->get($current);
+            if (strlen($response->body()) > self::MAX_RESPONSE_BYTES) {
+                throw new RuntimeException('La respuesta pública excede el límite permitido.');
+            }
             if (!$response->redirect()) return [$response, $current];
             $location = $response->header('Location');
             if (!$location) return [$response, $current];

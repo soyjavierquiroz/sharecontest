@@ -14,3 +14,10 @@ Route::get('/health', function () {
     catch (\Throwable) { return response()->json(['status'=>'degraded','database'=>'error','redis'=>'error'], 503); }
 });
 Route::get('/admin', [AdminController::class, 'index'])->middleware('admin.basic')->name('admin.index');
+Route::middleware('admin.basic')->prefix('admin')->name('admin.')->group(function () {
+    Route::post('/submissions/refresh-all', [AdminController::class, 'refreshAll'])->name('submissions.refresh-all');
+    Route::post('/submissions/refresh-selected', [AdminController::class, 'refreshSelected'])->name('submissions.refresh-selected');
+    Route::get('/submissions/{submission}', [AdminController::class, 'show'])->name('submissions.show');
+    Route::post('/submissions/{submission}/refresh', [AdminController::class, 'refresh'])->name('submissions.refresh');
+    Route::delete('/submissions/{submission}', [AdminController::class, 'destroy'])->name('submissions.destroy');
+});

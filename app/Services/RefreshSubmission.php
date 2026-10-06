@@ -13,7 +13,13 @@ class RefreshSubmission
     {
         $data = $this->providers->for($submission->platform)->inspect($submission->original_url);
         $caption = $data->caption ?? $submission->caption;
-        $hasUsefulMetadata = $data->author !== null || $data->username !== null || $caption !== null || $data->publishedAt !== null || $data->views !== null || $data->likes !== null || $data->comments !== null;
+        $publishedAt = $data->publishedAt ?? $submission->published_at;
+        $author = $data->author ?? $submission->author;
+        $username = $data->username ?? $submission->username;
+        $views = $data->views ?? $submission->views;
+        $likes = $data->likes ?? $submission->likes;
+        $comments = $data->comments ?? $submission->comments;
+        $hasUsefulMetadata = $author !== null || $username !== null || $caption !== null || $publishedAt !== null || $views !== null || $likes !== null || $comments !== null;
         $status = match (true) {
             $data->isPublic === false => 'invalid',
             $data->isPublic !== true || !$hasUsefulMetadata => 'review_required',
@@ -22,15 +28,15 @@ class RefreshSubmission
         $submission->fill([
             'canonical_url' => $data->canonicalUrl ?? $submission->canonical_url,
             'external_id' => $data->externalId ?? $submission->external_id,
-            'author' => $data->author ?? $submission->author,
-            'username' => $data->username ?? $submission->username,
+            'author' => $author,
+            'username' => $username,
             'caption' => $caption,
-            'published_at' => $data->publishedAt ?? $submission->published_at,
-            'is_public' => $data->isPublic,
+            'published_at' => $publishedAt,
+            'is_public' => $data->isPublic ?? $submission->is_public,
             'hashtag_valid' => null,
-            'views' => $data->views ?? $submission->views,
-            'likes' => $data->likes ?? $submission->likes,
-            'comments' => $data->comments ?? $submission->comments,
+            'views' => $views,
+            'likes' => $likes,
+            'comments' => $comments,
             'status' => $status,
             'validation_message' => $data->error ?: ($status === 'valid' ? 'Datos públicos obtenidos.' : ($status === 'invalid' ? 'La publicación no está disponible o no es válida.' : 'Datos parciales: no pudimos obtener toda la información pública.')),
             'provider' => $data->provider,

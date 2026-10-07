@@ -56,3 +56,35 @@ Detener sólo ShareContest: `docker stack rm sharecontest`. Rollback básico: re
 - Instagram y Facebook: consulta HTML público y metadatos OpenGraph; muros de login, 403, 429 o metadata insuficiente dejan la participación en revisión.
 
 Las consultas tienen timeout, redirecciones limitadas, whitelist de hosts y bloqueo de URLs/protocolos no permitidos. No hay OAuth, scraping con evasión, proxies ni bypass de CAPTCHA.
+
+## JAKAWI INTEGRATION
+
+JAKAWI debe llamar desde su **backend**, nunca desde el navegador: el token Bearer es un secreto de servidor y no se habilita CORS público.
+
+`POST https://sharecontest.kuruk.in/api/v1/inspect`
+
+```http
+Authorization: Bearer $SHARECONTEST_API_TOKEN
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://www.instagram.com/reel/ABC123/",
+  "external_reference": "participation-9282",
+  "campaign_reference": "campaign-81",
+  "rules": {
+    "allowed_platforms": ["tiktok", "instagram", "facebook"],
+    "required_hashtags": ["#HakawiChallenge"],
+    "required_mentions": ["@hakawi"],
+    "published_from": "2026-10-01",
+    "published_until": "2026-10-31"
+  }
+}
+```
+
+Solo `url` es obligatorio. La respuesta contiene `data` normalizada (incluyendo métricas que pueden ser `null`), `data_quality` (`complete`, `partial` o `none`) y una validación independiente. Cada check de `validation.checks` es `passed`, `failed` o `unknown`; el resultado global es `valid`, `invalid`, `review_required` o `not_requested`. Un dato no observable es `unknown`, nunca un fallo. En particular, etiquetas visuales de Instagram que no estén presentes en metadata textual pública no pueden verificarse y se devuelven como `unknown`.
+
+Los códigos son `200` (también para datos parciales), `401`, `422` y `429`; los errores tienen la forma `{"success":false,"error":{"code":"…","message":"…"}}`. `GET /api/v1/health` es público y devuelve el estado de PostgreSQL y Redis.
+
+Para el refresh final del concurso, JAKAWI vuelve a enviar cada URL a este mismo endpoint con el mismo `external_reference`. ShareContest reutiliza la submission `source=api`, actualiza los datos públicos, conserva los datos buenos cuando una extracción posterior no los devuelve y añade snapshots de métricas cuando hay métricas nuevas. Si no se envía `external_reference`, se crea una submission nueva.
